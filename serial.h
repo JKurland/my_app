@@ -7,7 +7,7 @@
 template<typename ...HandlerTs>
 class Serial {
 public:
-    Serial(HandlerTs...handlers): handlers(handlers...) {}
+    Serial(HandlerTs...handlers): handlers(std::move(handlers)...) {}
 
     template<typename CtxT, typename EventT>
     std::enable_if_t<any_can_call<std::tuple<CtxT&, EventT&>, HandlerTs...>()> operator() (CtxT& ctx, const EventT& event) {

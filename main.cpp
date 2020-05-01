@@ -3,11 +3,14 @@
 #include <string>
 #include "serial.h"
 #include "first.h"
+#include "buffered.h"
 
 template<typename EventHandlerT, typename RequestHandlerT>
 class Ctx {
 public:
-    Ctx(EventHandlerT event_handler, RequestHandlerT request_handler): event_handler(event_handler), request_handler(request_handler){}
+    Ctx(EventHandlerT event_handler, RequestHandlerT request_handler):
+        event_handler(std::move(event_handler)),
+        request_handler(std::move(request_handler)){}
 
     template<class T>
     void handle_event(T&& t) {
@@ -28,14 +31,21 @@ int main() {
 
     Ctx ctx {
         Serial {
-            [](auto ctx, int i){std::cout << ctx.handle_request(i).value() << std::endl;},
-            [](auto ctx, const char* i){std::cout << "c string " << i << std::endl;},
-            [](auto ctx, std::string i){std::cout << "c++ string " << i << std::endl;},
+            [](auto& ctx, int i){std::cout << ctx.handle_request(i).value() << std::endl;},
+            [](auto& ctx, const char* i){std::cout << "c string " << i << std::endl;},
+            [](auto& ctx, std::string i){std::cout << "c++ string " << i << std::endl;},
+            Buffered {
+                [](auto& ctx, std::string i){std::cout << "A c++ string " << i << std::endl;},
+            },
+            Buffered {
+                [](auto& ctx, std::string i){std::cout << "B c++ string " << i << std::endl;},
+            },
         },
 
+
         First {
-            [](auto ctx, int j){return ctx.handle_request("hello");},
-            [](auto ctx, const char* c_str){return std::optional<int>(2);},
+            [](auto& ctx, int j){return ctx.handle_request("hello");},
+            [](auto& ctx, const char* c_str){return std::optional<int>(2);},
         }
     };
     
