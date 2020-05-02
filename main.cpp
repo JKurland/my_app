@@ -66,4 +66,5 @@ int main() {
     ctx.handle_event(MyEvent{});
     ctx.handle_event(std::string("hello"));
     ctx.handle_event(2);
+    //ctx.handle_request(std::optional<int>{2});
 }

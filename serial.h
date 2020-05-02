@@ -30,6 +30,9 @@ public:
             }
         });
     }
+
+    template<typename CtxT>
+    void operator() (CtxT&, NoHandlerError) = delete;
 private:
     std::tuple<HandlerTs...> handlers;
 

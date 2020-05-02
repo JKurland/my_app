@@ -14,6 +14,9 @@ public:
     auto operator() (CtxT& ctx, const RequestT& request) {
         return std::apply([&](auto...handler_pack){return first_impl_outer(ctx, request, handler_pack...);}, handlers);
     }
+
+    template<typename CtxT>
+    void operator() (CtxT&, NoRequestHandlerError) = delete;
 private:
     std::tuple<HandlerTs...> handlers;
 
