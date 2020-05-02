@@ -15,6 +15,13 @@ namespace detail {
     template<typename...>
     constexpr std::false_type can_call_impl(...) {return {};}
 
+    template<int I>
+    struct Count{
+        static constexpr int value = I;
+    };
+
+    template<int I>
+    Count<I+1> inc(Count<I>){return {};}
 }
 
 template<typename...Ts, typename F>
@@ -29,27 +36,36 @@ struct can_call {
 
 namespace detail {
     template<typename First, typename...Rest, typename...ArgTs>
-    constexpr auto any_can_call_impl(std::tuple<ArgTs...> args) {
+    constexpr auto count_can_call_impl(const std::tuple<ArgTs...>& args) {
         if constexpr (can_call<First, ArgTs...>::value) {
-            (void)args;
-            return std::true_type{};
-        } else {
             if constexpr (sizeof...(Rest) > 0) {
-                return any_can_call_impl<Rest...>(args);
+                return detail::inc(count_can_call_impl<Rest...>(args));
             } else {
                 (void)args;
-                return std::false_type{};
+                return detail::Count<1>{};
+            }
+        } else {
+            if constexpr (sizeof...(Rest) > 0) {
+                return count_can_call_impl<Rest...>(args);
+            } else {
+                (void)args;
+                return detail::Count<0>{};
             }
         }
     }
 }
 
 template<typename ArgsTupleT, typename...HandlerTs>
-constexpr bool any_can_call() {
+constexpr int count_can_call() {
     if constexpr (sizeof...(HandlerTs) == 0) {
-        return false;
+        return 0;
     } else {
-        return decltype(detail::any_can_call_impl<HandlerTs...>(std::declval<ArgsTupleT>()))::value;
+        return decltype(detail::count_can_call_impl<HandlerTs...>(std::declval<ArgsTupleT>()))::value;
     }
+}
+
+template<typename ArgsTupleT, typename...HandlerTs>
+constexpr bool any_can_call() {
+    return count_can_call<ArgsTupleT, HandlerTs...>() > 0;
 }
 

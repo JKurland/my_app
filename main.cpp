@@ -27,6 +27,14 @@ private:
 };
 
 
+struct MyEvent {
+    MyEvent(const MyEvent&) = delete;
+    MyEvent& operator=(const MyEvent&) = delete;
+
+    MyEvent(MyEvent&&) = default;
+    MyEvent& operator=(MyEvent&&) = default;
+};
+
 int main() {
 
     Ctx ctx {
@@ -34,8 +42,12 @@ int main() {
             [](auto& ctx, int i){std::cout << ctx.handle_request(i).value() << std::endl;},
             [](auto& ctx, const char* i){std::cout << "c string " << i << std::endl;},
             [](auto& ctx, std::string i){std::cout << "c++ string " << i << std::endl;},
+            [](auto& ctx, MyEvent e){std::cout << "Got MyEvent" << std::endl;},
             Buffered {
-                [](auto& ctx, std::string i){std::cout << "A c++ string " << i << std::endl;},
+                Serial {
+                    // [](auto& ctx, MyEvent e){std::cout << "Also Got MyEvent" << std::endl;}, // Compiler error because MyEvent can't be copied but 2 handlers want ownership
+                    [](auto& ctx, std::string i){std::cout << "A c++ string " << i << std::endl;},
+                }
             },
             Buffered {
                 [](auto& ctx, std::string i){std::cout << "B c++ string " << i << std::endl;},
@@ -51,6 +63,7 @@ int main() {
     
 
     std::cout << ctx.handle_request(4).value() << std::endl;
+    ctx.handle_event(MyEvent{});
     ctx.handle_event(std::string("hello"));
     ctx.handle_event(2);
 }

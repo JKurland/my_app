@@ -87,32 +87,30 @@ public:
         worker(std::make_unique<detail::Worker>())
         {}
 
-    template<typename CtxT, typename EventT>
-    auto operator()(CtxT& ctx, const EventT& event) {
-        if constexpr (can_call<decltype(*handler), CtxT&, EventT&>::value) {
-            std::promise<decltype((*handler)(ctx, event))> promise;
-            auto future = promise.get_future();
+    template<typename CtxT, typename EventT, typename = std::enable_if_t<can_call<HandlerT, CtxT&, EventT>::value>>
+    auto operator()(CtxT& ctx, EventT event) {
+        std::promise<decltype((*handler)(ctx, std::move(event)))> promise;
+        auto future = promise.get_future();
 
-            {
-                worker->add_job([h=handler.get(), &ctx, event, p=std::move(promise)] () mutable {
-                    try {
-                        if constexpr (std::is_same_v<decltype((*h)(ctx, event)), void>) {
-                            (*h)(ctx, event);
-                            p.set_value();
-                        } else {
-                            p.set_value((*h)(ctx, event));
-                        }
-                    } catch (...) {
-                        try {
-                            p.set_exception(std::current_exception());
-                        } catch (...) {
-                            // do nothing
-                        }
+        {
+            worker->add_job([h=handler.get(), &ctx, e=std::move(event), p=std::move(promise)] () mutable {
+                try {
+                    if constexpr (std::is_same_v<decltype((*h)(ctx, std::move(e))), void>) {
+                        (*h)(ctx, std::move(e));
+                        p.set_value();
+                    } else {
+                        p.set_value((*h)(ctx, std::move(e)));
                     }
-                });
-            }
-            return future;
+                } catch (...) {
+                    try {
+                        p.set_exception(std::current_exception());
+                    } catch (...) {
+                        // do nothing
+                    }
+                }
+            });
         }
+        return future;
     }
 private:
     std::unique_ptr<HandlerT> handler;
