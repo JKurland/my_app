@@ -13,14 +13,14 @@ public:
         event_handler(std::move(event_handler)),
         request_handler(std::move(request_handler)){}
 
-    template<class T>
-    void handle_event(T&& t) {
-        event_handler(*this, std::forward<T>(t));
+    template<class EventT>
+    void handle_event(EventT&& t) {
+        event_handler(*this, std::forward<EventT>(t));
     }
 
-    template<class T>
-    auto handle_request(T&& t) {
-        return request_handler(*this, std::forward<T>(t));
+    template<class RequestT>
+    auto handle_request(RequestT&& t) {
+        return request_handler(*this, std::forward<RequestT>(t));
     }
 private:
     EventHandlerT event_handler;
@@ -63,8 +63,10 @@ int main() {
                 // Because this is the only handler that wants ownership of MyEvent, MyEvent does
                 // not have to be copy constructable. It can be moved into the handler
                 [](auto& ctx, MyEvent e){std::cout << "Moved from MyEvent" << std::endl;},
+
                 // Compiler error because MyEvent can't be copied but 2 handlers want ownership
                 // [](auto& ctx, MyEvent e){std::cout << "MyEvent is already taken" << std::endl;},
+
                 Buffered {
                     Serial {
                         // [](auto& ctx, const MyEvent& e){std::cout << "Buffered can't move from MyEvent because it has already been moved from" << std::endl;},
