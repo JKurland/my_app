@@ -9,12 +9,7 @@
 template<typename HandlerT>
 class Dynamic {
 public:
-    Dynamic() = default;
     Dynamic(std::vector<std::unique_ptr<HandlerT>> handlers): handlers(std::move(handlers)) {}
-
-    void add_handler(std::unique_ptr<HandlerT> handler) {
-        handlers.emplace_back(std::move(handler));
-    }
 
     template<typename CtxT, typename EventT, typename = std::enable_if_t<can_call<HandlerT, CtxT&, EventT>>>
     void operator()(CtxT& ctx, EventT&& event) {
