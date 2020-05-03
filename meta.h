@@ -23,6 +23,12 @@ namespace detail {
 
     template<int I>
     Count<I+1> inc(Count<I>){return {};}
+
+    template<typename T>
+    constexpr std::false_type is_optional(const T&) {return {};}
+
+    template<typename T>
+    constexpr std::true_type is_optional(const std::optional<T>&) {return {};} 
 }
 
 template<typename...Ts, typename F>
@@ -84,7 +90,49 @@ struct NoRequestHandlerError {
     }
 };
 
+// template<typename T>
+// void print_type(T t) {
+//     static_assert(!std::is_same_v<T, T>, "T");
+// }
+
+template<typename...ArgTs>
+struct SplitCanCall {
+    // splits the handlers into all but the last
+    // handler that can accept Args and the last handler
+    // that can accept args.
+    template<typename First, typename...Rest>
+    constexpr auto operator()(First& first, Rest&...rest) const {
+        if constexpr (!can_call<First, ArgTs...>::value) {
+            (void)first;
+            if constexpr (sizeof...(rest) == 0) {
+                return nullptr;
+            } else {
+                return (*this)(rest...);
+            }
+        } else {
+            if constexpr (sizeof...(rest) == 0) {
+                return std::make_tuple(std::make_tuple(), std::addressof(first));
+            } else {
+                // TODO force inline.
+                const auto inner = (*this)(rest...);
+                if constexpr (std::is_null_pointer_v<std::remove_const_t<decltype(inner)>>) {
+                    return std::make_tuple(std::make_tuple(), std::addressof(first));
+                } else {
+                    return std::make_tuple(
+                        std::tuple_cat(std::make_tuple(std::addressof(first)), std::get<0>(inner)),
+                        std::get<1>(inner)
+                    );
+                }
+            }
+        }
+    }
+};
+
 template<typename T>
-void print_type(T t) {
-    static_assert(!std::is_same_v<T, T>, "T");
+constexpr bool is_optional() {
+    if constexpr (std::is_void_v<T>) {
+        return false;
+    } else {
+        return decltype(detail::is_optional(std::declval<T>()))::value;
+    }
 }
