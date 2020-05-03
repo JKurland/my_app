@@ -45,11 +45,18 @@ namespace detail {
             thread.join();
         }
 
-        template<class T>
-        void add_job(T t) {
+        Worker(const Worker&) = delete;
+        Worker(Worker&&) = delete;
+
+        Worker& operator=(const Worker&) = delete;
+        Worker& operator=(Worker&&) = delete;
+
+        template<class FunctionT>
+        void add_job(FunctionT f) {
             {
+                auto job = std::make_unique<detail::Job<FunctionT>>(std::move(f));
                 std::lock_guard<std::mutex> lock(mutex);
-                buffer.emplace_back(std::make_unique<detail::Job<T>>(std::move(t)));
+                buffer.emplace_back(std::move(job));
             }
             cv.notify_one();
         }

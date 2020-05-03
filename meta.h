@@ -6,11 +6,12 @@
 namespace detail {
     template<typename...Ts, typename F, size_t...Is>
     constexpr void static_for_each(std::tuple<Ts...>& t, F func, std::index_sequence<Is...>) {
+        (void) func;
         (func(std::get<Is>(t)),...);
     }
 
     template<typename F, typename...ArgTs>
-    constexpr std::true_type can_call_impl(decltype((std::declval<F>()(std::declval<ArgTs>()...), 0))) {return {};}
+    constexpr std::true_type can_call_impl(decltype((std::declval<F&>()(std::declval<ArgTs>()...), 0))) {return {};}
 
     template<typename...>
     constexpr std::false_type can_call_impl(...) {return {};}
@@ -82,3 +83,8 @@ struct NoRequestHandlerError {
         static_assert(!std::is_same_v<RequestT, RequestT>, "No handler found for request of type RequestT");
     }
 };
+
+template<typename T>
+void print_type(T t) {
+    static_assert(!std::is_same_v<T, T>, "T");
+}
