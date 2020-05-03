@@ -103,8 +103,9 @@ int main() {
 
             // This is ok even though MyRequest is not copyable. This is because
             // the first handler doesn't return a std::optional, this indicates to
-            // the compiler that the remaining request handlers do not need to be called
-            // so MyRequest can be forwarded into the first handler.
+            // the compiler that the remaining request handlers never need to be called
+            // so MyRequest can be forwarded into the first handler and the second handler
+            // is ignored.
             [](auto& ctx, MyRequest req){return "The handler that gets called";},
             // This handler is never called because the handler above doesn't return an optional
             [](auto& ctx, MyRequest req){return "Doesn't get called because something else has non optionally answered MyRequest";},

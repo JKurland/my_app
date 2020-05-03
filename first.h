@@ -10,7 +10,7 @@ class First {
 public:
     First(HandlerTs...handlers): handlers(handlers...) {}
 
-    template<typename CtxT, typename RequestT, typename = std::enable_if_t<(count_can_call<std::tuple<CtxT&, RequestT>, HandlerTs...>() > 0)>>
+    template<typename CtxT, typename RequestT, typename = std::enable_if_t<any_can_call<std::tuple<CtxT&, RequestT>, HandlerTs...>()>>
     auto operator() (CtxT& ctx, RequestT&& request) {
         auto split = std::apply(SplitCanCall<CtxT&, RequestT>{}, handlers);
         auto head = std::get<0>(split);

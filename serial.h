@@ -26,10 +26,10 @@ public:
         (*last)(ctx, std::forward<EventT>(event));
     }
 
-    // unlike MustHandle this allows sfinae to handle a lack of handlers
+    // unlike MustHandle this allows sfinae to account for a lack of handlers
+    // but will still display a compiler error message if called directly.
     template<typename CtxT>
     void operator() (CtxT&, NoHandlerError) = delete;
 private:
     std::tuple<HandlerTs...> handlers;
-
 };
