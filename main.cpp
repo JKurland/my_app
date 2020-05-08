@@ -5,6 +5,9 @@
 #include "event/first.h"
 #include "event/buffered.h"
 #include "event/must_handle.h"
+#include "SDL2/SDL.h"
+#include "SDL2/SDL_vulkan.h"
+#include "vulkan/vulkan.hpp"
 
 template<typename EventHandlerT, typename RequestHandlerT>
 class Ctx {
@@ -124,4 +127,58 @@ int main() {
 
     // compiler error because nothing handles a request of type string
     //ctx.handle_request(std::string("anyone there?"));
+
+
+
+    // -------------------- SDL ------------------------
+    if(SDL_Init(SDL_INIT_VIDEO) < 0)
+    {
+        std::cout << "Failed to initialize the SDL2 library\n";
+        return -1;
+    }
+
+    SDL_Window *window = SDL_CreateWindow("SDL2 Window",
+                                          SDL_WINDOWPOS_CENTERED,
+                                          SDL_WINDOWPOS_CENTERED,
+                                          680, 480,
+                                          SDL_WINDOW_VULKAN);
+
+    if(!window)
+    {
+        std::cout << "Failed to create window\n";
+        return -1;
+    }
+
+    uint32_t extensionCount;
+    SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, nullptr);
+    std::vector<const char *> extensionNames(extensionCount);
+    SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, extensionNames.data());
+
+    // initialize the vk::ApplicationInfo structure
+    vk::ApplicationInfo applicationInfo( "AppName", 1, "Vulkan.hpp", 1, VK_API_VERSION_1_1 );
+
+    // initialize the vk::InstanceCreateInfo
+    vk::InstanceCreateInfo instanceCreateInfo( {}, &applicationInfo, 0, nullptr, extensionNames.size(), extensionNames.data());
+
+    // create a UniqueInstance
+    vk::UniqueInstance instance = vk::createInstanceUnique( instanceCreateInfo );
+
+    VkSurfaceKHR surface_raw;
+    if (!SDL_Vulkan_CreateSurface(window, *instance, &surface_raw)) {
+        std::cout << "Failed to create surface" << std::endl;
+        return -1;
+    }
+    auto surface = vk::UniqueSurfaceKHR(vk::SurfaceKHR(surface_raw), vk::ObjectDestroy<vk::Instance, decltype(VULKAN_HPP_DEFAULT_DISPATCHER)>(*instance));
+
+    vk::PhysicalDevice physicalDevice = instance->enumeratePhysicalDevices().front();
+    vk::PhysicalDeviceProperties props;
+    physicalDevice.getProperties(&props);
+    std::cout << props.deviceName << std::endl;
+
+
+    SDL_UpdateWindowSurface(window);
+    SDL_DestroyWindow(window);
+
+    SDL_Delay(5000);
+    SDL_Quit();
 }

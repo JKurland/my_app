@@ -1,4 +1,4 @@
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 git_repository(
@@ -28,3 +28,33 @@ llvm_toolchain(
 load("@llvm_toolchain//:toolchains.bzl", "llvm_register_toolchains")
 
 llvm_register_toolchains()
+
+http_archive(
+   name = "rules_foreign_cc",
+   strip_prefix = "rules_foreign_cc-master",
+   url = "https://github.com/bazelbuild/rules_foreign_cc/archive/master.zip",
+)
+load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
+rules_foreign_cc_dependencies([])
+
+new_git_repository(
+    name = "sdl2",
+    remote = "https://github.com/spurious/SDL-mirror.git",
+    commit = "2dfaaa3a821e029b2ddd48a84acea6a583c66638",
+    build_file_content = """filegroup(name = "all", srcs = glob(["**"]), visibility = ["//visibility:public"])""",
+)
+
+new_git_repository(
+    name = "vulkan_hpp",
+    remote = "https://github.com/KhronosGroup/Vulkan-Headers.git",
+    commit = "9250d5ae8f50202005233dc0512a1d460c8b4833",
+    shallow_since = "1588589217 -0700",
+    build_file_content = """
+cc_library(
+    name = "vulkan_hpp",
+    hdrs = glob(["include/vulkan/*.hpp", "include/vulkan/*.h"]),
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "include",
+)
+"""
+)

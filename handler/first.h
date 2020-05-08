@@ -5,6 +5,17 @@
 #include "meta.h"
 
 namespace detail {
+    template<typename T>
+    constexpr bool is_definitive() {
+        if constexpr (std::is_void_v<T>) {
+            return true;
+        } else if constexpr (decltype(is_optional_impl(std::declval<T>()))::value){
+            return false;
+        } else {
+            return true;
+        }
+    }
+
     template<typename ResultT>
     struct FirstResultWrapper {
         template<typename F>
@@ -63,7 +74,10 @@ namespace detail {
         RequestT& request;
 
         auto operator()() {
-            if constexpr (!is_optional<decltype(handler(ctx, std::forward<RequestT>(request)))>()) {
+            if constexpr (is_definitive<decltype(handler(ctx, std::forward<RequestT>(request)))>()) {
+                // If the handler returns something that means we won't have to call
+                // any more handlers then it's ok to forward the request. This is essentially the last
+                // handler.
                 return handler(ctx, std::forward<RequestT>(request));
             } else {
                 return handler(ctx, static_cast<const RequestT&>(request));

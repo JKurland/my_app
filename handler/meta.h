@@ -178,12 +178,12 @@ namespace detail {
 
 template<typename ArgsTupleT, typename...HandlerTs>
 constexpr auto can_call_indices() {
-    return detail::can_call_indices_impl<0, std::index_sequence<>, ArgsTupleT, HandlerTs...>();
+    return decltype(detail::can_call_indices_impl<0, std::index_sequence<>, ArgsTupleT, HandlerTs...>()){};
 }
 
 template<typename ArgsTupleT, typename...HandlerTs>
 constexpr auto can_call_head() {
-    return head_indices(can_call_indices<ArgsTupleT, HandlerTs...>());
+    return decltype(head_indices(can_call_indices<ArgsTupleT, HandlerTs...>())){};
 }
 
 template<typename ArgsTupleT, typename...HandlerTs>
@@ -191,11 +191,3 @@ constexpr auto can_call_last() {
     return last_idx(can_call_indices<ArgsTupleT, HandlerTs...>());
 }
 
-template<typename T>
-constexpr bool is_optional() {
-    if constexpr (std::is_void_v<T>) {
-        return false;
-    } else {
-        return decltype(detail::is_optional_impl(std::declval<T>()))::value;
-    }
-}
