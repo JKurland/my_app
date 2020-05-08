@@ -16,6 +16,7 @@
 namespace detail {
     class IJob {
     public:
+        virtual ~IJob() = default;
         virtual void run() = 0;
     };
 

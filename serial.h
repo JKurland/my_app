@@ -14,16 +14,16 @@ public:
     void operator() (CtxT& ctx, EventT&& event) {
         // check can call with EventT to help people catch missing const specifiers. They will get
         // a compiler error instead of their event handler not being called
-        auto split = std::apply(SplitCanCall<CtxT&, EventT>{}, handlers);
-        auto head = std::get<0>(split);
-        auto last = std::get<1>(split);
-        static_for_each(head, [&](auto& handler){
-            (*handler)(ctx, static_cast<const EventT&>(event));
-        });
 
-        // forward the event to the last handler because event doesn't have to outlive
-        // this function if we have ownership. 
-        (*last)(ctx, std::forward<EventT>(event));
+        constexpr auto head = can_call_head<std::tuple<CtxT&, EventT>, HandlerTs...>();
+        static_for_each_index(handlers, [&](auto& handler){
+            handler(ctx, static_cast<const EventT&>(event));
+        }, head);
+
+        // forward the event to the last handler, the last handler is
+        // allowed to do whatever it wants to event.
+        constexpr std::size_t last = can_call_last<std::tuple<CtxT&, EventT>, HandlerTs...>();
+        std::get<last>(handlers)(ctx, std::forward<EventT>(event));
     }
 
     // unlike MustHandle this allows sfinae to account for a lack of handlers

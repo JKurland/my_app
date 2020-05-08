@@ -26,6 +26,17 @@ TEST(TestSerial, two_handlers) {
     ASSERT_EQ(i, 11);
 }
 
+TEST(TestSerial, two_handlers_one_event) {
+    int i = 0;
+    auto handler = Serial {
+        [](int& ctx, int event){ctx += event;},
+        [](int& ctx, int event){ctx *= event;},
+    };
+
+    handler(i, 5);
+    ASSERT_EQ(i, 25);
+}
+
 struct MoveOnly {
     MoveOnly(std::string s): s(s) {}
 

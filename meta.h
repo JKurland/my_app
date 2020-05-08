@@ -4,12 +4,6 @@
 #include <type_traits>
 
 namespace detail {
-    template<typename...Ts, typename F, size_t...Is>
-    constexpr void static_for_each(std::tuple<Ts...>& t, F func, std::index_sequence<Is...>) {
-        (void) func;
-        (func(std::get<Is>(t)),...);
-    }
-
     template<typename F, typename...ArgTs>
     constexpr std::true_type can_call_impl(decltype((std::declval<F&>()(std::declval<ArgTs>()...), 0))) {return {};}
 
@@ -25,15 +19,21 @@ namespace detail {
     Count<I+1> inc(Count<I>){return {};}
 
     template<typename T>
-    constexpr std::false_type is_optional(const T&) {return {};}
+    constexpr std::false_type is_optional_impl(const T&) {return {};}
 
     template<typename T>
-    constexpr std::true_type is_optional(const std::optional<T>&) {return {};} 
+    constexpr std::true_type is_optional_impl(const std::optional<T>&) {return {};} 
+}
+
+template<typename...Ts, typename F, size_t...Is>
+constexpr void static_for_each_index(std::tuple<Ts...>& t, F func, std::index_sequence<Is...>) {
+    (void) func;
+    (func(std::get<Is>(t)),...);
 }
 
 template<typename...Ts, typename F>
 constexpr void static_for_each(std::tuple<Ts...>& t, F func) {
-    detail::static_for_each(t, func, std::make_index_sequence<sizeof...(Ts)>{});
+    static_for_each_index(t, func, std::make_index_sequence<sizeof...(Ts)>{});
 }
 
 template<typename F, typename...ArgTs>
@@ -128,11 +128,74 @@ struct SplitCanCall {
     }
 };
 
+template<std::size_t I, std::size_t...Is>
+constexpr auto seq_prepend(std::index_sequence<Is...>) {
+    return std::index_sequence<I, Is...>{};
+}
+
+template<std::size_t I, std::size_t...Is>
+constexpr auto seq_append(std::index_sequence<Is...>) {
+    return std::index_sequence<Is..., I>{};
+}
+
+template<std::size_t...Is>
+constexpr std::size_t last_idx(std::index_sequence<Is...>) {
+    return std::remove_reference_t<decltype(std::get<sizeof...(Is)-1>(std::declval<std::tuple<detail::Count<Is>...>>()))>::value;
+}
+
+template<std::size_t First, std::size_t...Is>
+constexpr auto head_indices(std::index_sequence<First, Is...>) {
+    if constexpr(sizeof...(Is) == 0) {
+        return std::index_sequence<>{};
+    } else {
+        if constexpr(sizeof...(Is) == 1) {
+            return std::index_sequence<First>{};
+        } else {
+            return seq_prepend<First>(head_indices(std::index_sequence<Is...>{}));
+        }
+    }
+}
+
+namespace detail {
+    template<size_t Idx, typename SeqT, typename ArgsTupleT, typename FirstHandlerT, typename...RestHandlerTs>
+    constexpr auto can_call_indices_impl() {
+        if constexpr(any_can_call<ArgsTupleT, FirstHandlerT>()) {
+            using NewSeqT = decltype(seq_append<Idx>(std::declval<SeqT>()));
+            if constexpr(sizeof...(RestHandlerTs) > 0) {
+                return can_call_indices_impl<Idx+1, NewSeqT, ArgsTupleT, RestHandlerTs...>();
+            } else {
+                return NewSeqT{};
+            }
+        } else {
+            if constexpr(sizeof...(RestHandlerTs) > 0) {
+                return can_call_indices_impl<Idx+1, SeqT, ArgsTupleT, RestHandlerTs...>();
+            } else {
+                return SeqT{};
+            }
+        }
+    }
+}
+
+template<typename ArgsTupleT, typename...HandlerTs>
+constexpr auto can_call_indices() {
+    return detail::can_call_indices_impl<0, std::index_sequence<>, ArgsTupleT, HandlerTs...>();
+}
+
+template<typename ArgsTupleT, typename...HandlerTs>
+constexpr auto can_call_head() {
+    return head_indices(can_call_indices<ArgsTupleT, HandlerTs...>());
+}
+
+template<typename ArgsTupleT, typename...HandlerTs>
+constexpr auto can_call_last() {
+    return last_idx(can_call_indices<ArgsTupleT, HandlerTs...>());
+}
+
 template<typename T>
 constexpr bool is_optional() {
     if constexpr (std::is_void_v<T>) {
         return false;
     } else {
-        return decltype(detail::is_optional(std::declval<T>()))::value;
+        return decltype(detail::is_optional_impl(std::declval<T>()))::value;
     }
 }
