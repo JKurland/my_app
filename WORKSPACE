@@ -38,7 +38,7 @@ load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependen
 rules_foreign_cc_dependencies([])
 
 new_git_repository(
-    name = "sdl2",
+    name = "sdl2_source",
     remote = "https://github.com/spurious/SDL-mirror.git",
     commit = "2dfaaa3a821e029b2ddd48a84acea6a583c66638",
     build_file_content = """filegroup(name = "all", srcs = glob(["**"]), visibility = ["//visibility:public"])""",
@@ -57,4 +57,33 @@ cc_library(
     strip_include_prefix = "include",
 )
 """
+)
+
+git_repository(
+    name = "glslang",
+    remote = "https://github.com/KhronosGroup/glslang.git",
+    commit = "bcf6a2430e99e8fc24f9f266e99316905e6d5134",
+    shallow_since = "1587975125 -0600",
+)
+
+http_archive(
+    name = "glm",
+    url = "https://github.com/g-truc/glm/releases/download/0.9.9.8/glm-0.9.9.8.zip",
+    strip_prefix = "glm",
+    build_file_content = """
+cc_library(
+    name = "detail",
+    hdrs = glob(["glm/detail/**/*.inl", "glm/detail/**/*.hpp"]),
+    strip_include_prefix = "glm/detail",
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "glm",
+    hdrs = glob(["glm/**/*.hpp", "glm/**/*.h", "glm/detail/**/*.inl"]),
+    deps = [":detail"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "37e2a3d62ea3322e43593c34bae29f57e3e251ea89f4067506c94043769ade4c",
 )
