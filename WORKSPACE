@@ -72,18 +72,27 @@ http_archive(
     strip_prefix = "glm",
     build_file_content = """
 cc_library(
-    name = "detail",
-    hdrs = glob(["glm/detail/**/*.inl", "glm/detail/**/*.hpp"]),
-    strip_include_prefix = "glm/detail",
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "glm",
-    hdrs = glob(["glm/**/*.hpp", "glm/**/*.h", "glm/detail/**/*.inl"]),
-    deps = [":detail"],
+    hdrs = glob(["glm/**/*.hpp", "glm/**/*.h"]),
+    textual_hdrs = glob(["glm/**/*.inl"]),
     visibility = ["//visibility:public"],
 )
 """,
     sha256 = "37e2a3d62ea3322e43593c34bae29f57e3e251ea89f4067506c94043769ade4c",
+)
+
+
+new_git_repository(
+    name = "stb",
+    remote = "https://github.com/nothings/stb.git",
+    commit = "f54acd4e13430c5122cab4ca657705c84aa61b08",
+    shallow_since = "1580905940 -0800",
+    build_file_content = """
+cc_library(
+    name = "stb",
+    hdrs = glob(["*.h"]),
+    include_prefix = "stb",
+    visibility = ["//visibility:public"],
+)
+"""
 )

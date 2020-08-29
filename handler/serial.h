@@ -21,7 +21,7 @@ public:
         }, head);
 
         // forward the event to the last handler, the last handler is
-        // allowed to do whatever it wants to event.
+        // allowed to do whatever it wants to event (e.g. move out of it).
         constexpr std::size_t last = can_call_last<std::tuple<CtxT&, EventT>, HandlerTs...>();
         std::get<last>(handlers)(ctx, std::forward<EventT>(event));
     }

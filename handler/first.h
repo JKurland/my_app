@@ -8,8 +8,8 @@ namespace detail {
     template<typename T>
     constexpr bool is_definitive() {
         if constexpr (std::is_void_v<T>) {
-            return true;
-        } else if constexpr (decltype(is_optional_impl(std::declval<T>()))::value){
+            return false;
+        } else if constexpr (decltype(is_optional_impl(std::declval<T>()))::value) {
             return false;
         } else {
             return true;
@@ -30,7 +30,7 @@ namespace detail {
     struct FirstResultWrapper<void> {
         template<typename F>
         auto operator<<(F&& f) {
-            return make_first_result(f);
+            return make_first_result(std::forward<F>(f));
         }
 
         void get(){}
@@ -38,16 +38,26 @@ namespace detail {
 
     template<typename T>
     struct FirstResultWrapper<std::optional<T>> {
-        template<typename F>
+        template<typename F, typename = std::enable_if_t<!std::is_same_v<decltype(std::declval<F>()()), T>>>
         auto& operator<<(F&& f) {
-            if (!r) {
-                if constexpr (std::is_void_v<decltype(f())>) {
-                    f();
-                } else {
+            static_assert(std::is_same_v<decltype(f()), std::optional<T>> || false_v<F>, "F must either return T or std::optional<T>");
+
+            // avoiding unneeded compiler errors
+            if constexpr (!std::is_void_v<decltype(f())>) {
+                if (!r) {
                     r = f();
                 }
             }
             return *this;
+        }
+
+        template<typename F, typename = std::enable_if_t<std::is_same_v<decltype(std::declval<F>()()), T>>>
+        auto operator<<(F&& f) {
+            if (r) {
+                return FirstResultWrapper<T>{*r};
+            } else {
+                return FirstResultWrapper<T>{f()};
+            }
         }
 
         std::optional<T>&& get(){return std::move(r);}
@@ -66,12 +76,13 @@ namespace detail {
 
     // can't use a lambda because we only want the
     // call operator to be instantiated when needed
-    // otherwise we can't deal with no copy constructable requests
+    // otherwise we can't deal with non copy constructable requests
     template<typename HandlerT, typename CtxT, typename RequestT>
     struct FirstHandlerClosure {
+        FirstHandlerClosure(HandlerT& handler, CtxT& ctx, RequestT&& request): handler(handler), ctx(ctx), request(std::forward<RequestT>(request)) {}
         HandlerT& handler;
         CtxT& ctx;
-        RequestT& request;
+        RequestT request;
 
         auto operator()() {
             if constexpr (is_definitive<decltype(handler(ctx, std::forward<RequestT>(request)))>()) {
@@ -80,6 +91,9 @@ namespace detail {
                 // handler.
                 return handler(ctx, std::forward<RequestT>(request));
             } else {
+                static_assert(can_call<HandlerT&, CtxT&, const RequestT&>::value,
+                    "HandlerT is not the final possible handler so HandlerT must be able to accept a const RequestT&"
+                );
                 return handler(ctx, static_cast<const RequestT&>(request));
             }
         }
@@ -87,9 +101,10 @@ namespace detail {
 
     template<typename HandlerT, typename CtxT, typename RequestT>
     struct FirstLastHandlerClosure {
+        FirstLastHandlerClosure(HandlerT& handler, CtxT& ctx, RequestT&& request): handler(handler), ctx(ctx), request(std::forward<RequestT>(request)) {}
         HandlerT& handler;
         CtxT& ctx;
-        RequestT& request;
+        RequestT request;
 
         auto operator()() {
             return handler(ctx, std::forward<RequestT>(request));
@@ -109,14 +124,14 @@ namespace detail {
             FirstHandlerClosure<std::tuple_element_t<HeadIs, HandlerTup>, CtxT, RequestT>{
                 std::get<HeadIs>(handlers),
                 ctx,
-                request
+                std::forward<RequestT>(request)
             }
         );
 
         return (wrapper << FirstLastHandlerClosure<std::tuple_element_t<LastI, HandlerTup>, CtxT, RequestT>{
             std::get<LastI>(handlers),
             ctx,
-            request
+            std::forward<RequestT>(request)
         }).get();
     }
 }

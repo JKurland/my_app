@@ -18,12 +18,18 @@ cc_binary(
         "@vulkan_hpp//:vulkan_hpp",
         "//vulkan_utils:vulkan_utils",
         "@glm//:glm",
+        "@stb//:stb",
     ],
-    data = [":test_spirv"],
+    data = [":test_spirv", ":textures"],
 )
 
 spirv(
     name = "test_spirv",
     srcs = glob(["shaders/*"]),
     spirv_compiler = "@glslang//:glslangValidator",
+)
+
+filegroup(
+    name = "textures",
+    srcs = glob(["textures/*"]),
 )

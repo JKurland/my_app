@@ -76,17 +76,20 @@ constexpr bool any_can_call() {
     return count_can_call<ArgsTupleT, HandlerTs...>() > 0;
 }
 
+template<typename...Ts>
+constexpr bool false_v = false;
+
 struct NoHandlerError {
     template<typename EventT>
     NoHandlerError(EventT&&) {
-        static_assert(!std::is_same_v<EventT, EventT>, "No handler found for event of type EventT");
+        static_assert(false_v<EventT>, "No handler found for event of type EventT");
     }
 };
 
 struct NoRequestHandlerError {
     template<typename RequestT>
     NoRequestHandlerError(RequestT&&) {
-        static_assert(!std::is_same_v<RequestT, RequestT>, "No handler found for request of type RequestT");
+        static_assert(false_v<RequestT>, "No handler found for request of type RequestT");
     }
 };
 

@@ -7,6 +7,7 @@
 #include <array>
 #include <limits>
 #include <cstddef>
+#include <chrono>
 
 #include "event/serial.h"
 #include "event/first.h"
@@ -20,7 +21,14 @@
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
 #include "vulkan/vulkan.hpp"
+
+#define GLM_FORCE_RADIANS
 #include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
 
 namespace {
     std::vector<char> read_file(const std::string& filename) {
@@ -45,6 +53,45 @@ namespace {
         );
     }
 }
+
+class StbImage {
+public:
+    static StbImage from_file(const std::string& filename) {
+        int width;
+        int height;
+        int channels;
+        stbi_uc* pixels = stbi_load(filename.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        if (!pixels) {
+            throw std::runtime_error("Failed to load image from file");
+        }
+        return StbImage(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), channels);
+    }
+
+    size_t width() const {return width_;}
+    size_t height() const {return height_;}
+    vk::Extent2D extent() const {return {width_, height_};}
+    size_t channels() const {return channels_;}
+    size_t size() const {return width_ * height_ * 4;}
+
+    stbi_uc* pixels() {return pixels_.get();}
+    const stbi_uc* pixels() const {return pixels_.get();}
+private:
+    struct Deleter {
+        void operator()(stbi_uc* data) {
+            stbi_image_free(data);
+        }
+    };
+
+    std::unique_ptr<stbi_uc, Deleter> pixels_;
+    uint32_t width_;
+    uint32_t height_;
+    int channels_;
+    StbImage(stbi_uc* pixels, uint32_t width, uint32_t height, int channels):
+        pixels_(pixels),
+        width_(width),
+        height_(height),
+        channels_(channels) {}
+};
 
 class Window {
 public:
@@ -107,7 +154,7 @@ class Ctx {
 public:
     Ctx(EventHandlerT event_handler, RequestHandlerT request_handler):
         event_handler(std::move(event_handler)),
-        request_handler(std::move(request_handler)){}
+        request_handler(MustHandle{std::move(request_handler)}){}
 
     template<class EventT>
     void handle_event(EventT&& t) {
@@ -120,7 +167,7 @@ public:
     }
 private:
     EventHandlerT event_handler;
-    RequestHandlerT request_handler;
+    MustHandle<RequestHandlerT> request_handler;
 };
 
 
@@ -170,11 +217,35 @@ struct Vertex {
     }
 };
 
-const std::vector<Vertex> kVertices = {
-    {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+struct Mvp {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
 };
+
+struct SpinAnimation {
+    std::chrono::steady_clock::time_point start;
+    float degrees_per_second;
+
+    glm::mat4 model() const {
+        auto now = std::chrono::steady_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(now - start).count();
+        return glm::rotate(glm::mat4(1.0f), time * glm::radians(degrees_per_second), glm::vec3(0.0f, 0.0f, 1.0f));
+    }
+};
+
+
+const std::vector<Vertex> kVertices = {
+    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+};
+
+const std::vector<uint16_t> kIndices = {
+    0, 1, 2, 0, 2, 3
+};
+
 
 class VulkanState {
 public:
@@ -218,13 +289,27 @@ public:
     vk::UniqueShaderModule vert_module;
     vk::UniqueShaderModule frag_module;
     std::vector<vk::UniqueImageView> image_views;
+    vk::UniqueDescriptorSetLayout descriptor_set_layout;
     vk::UniquePipelineLayout pipeline_layout;
     vk::UniqueRenderPass render_pass;
     vk::UniquePipeline graphics_pipeline;
     std::vector<vk::UniqueFramebuffer> framebuffers;
     vk::UniqueCommandPool command_pool;
+
     vk::UniqueBuffer vertex_buffer;
     vk::UniqueDeviceMemory vertex_buffer_memory;
+
+    vk::UniqueBuffer index_buffer;
+    vk::UniqueDeviceMemory index_buffer_memory;
+
+    vk::UniqueImage texture_image;
+    vk::UniqueDeviceMemory texture_image_memory;
+
+    vk::UniqueDescriptorPool descriptor_pool;
+    std::vector<vk::UniqueDescriptorSet> descriptor_sets;
+    std::vector<vk::UniqueBuffer> uniform_buffers;
+    std::vector<vk::UniqueDeviceMemory> uniform_buffers_memory;
+
     std::vector<vk::UniqueCommandBuffer> command_buffers;
     std::vector<vk::UniqueSemaphore> image_available_semaphores;
     std::vector<vk::UniqueSemaphore> render_finished_semaphores;
@@ -243,14 +328,171 @@ public:
         return sizeof(kVertices[0]) * kVertices.size();
     }
 
+    size_t index_buffer_size() const {
+        return sizeof(kIndices[0]) * kIndices.size();
+    }
+
+    vk::Queue queue() {
+        return device->getQueue(queue_family_index, 0);
+    }
+
+    struct StagingBuffer {
+        static StagingBuffer from_data(VulkanState& vulkan_state, const void* data, size_t size) {
+            StagingBuffer sb;
+            sb.buffer = vulkan_state.make_buffer(vk::BufferUsageFlagBits::eTransferSrc, size);
+            sb.memory = vulkan_state.make_buffer_memory(
+                *sb.buffer,
+                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+            );
+
+            void* dst_mem = vulkan_state.device->mapMemory(*sb.memory, 0, size, vk::MemoryMapFlags{});
+            memcpy(dst_mem, data, size);
+            vulkan_state.device->unmapMemory(*sb.memory);
+            return sb;
+        }
+        vk::UniqueBuffer buffer;
+        vk::UniqueDeviceMemory memory;
+    };
+
+    void copy_data_to_buffer(vk::Buffer dst, const void* data, size_t size) {
+        copy_buffer(
+            *(StagingBuffer::from_data(*this, data, size).buffer),
+            dst,
+            size
+        );
+    }
+
+    void copy_stbimage_to_image(vk::Image dst, const StbImage& image) {
+        transition_image_layout(
+            dst,
+            vk::Format::eR8G8B8A8Srgb,
+            vk::ImageLayout::eUndefined,
+            vk::ImageLayout::eTransferDstOptimal
+        );
+
+        copy_buffer_to_image(
+            *(StagingBuffer::from_data(*this, image.pixels(), image.size()).buffer),
+            dst,
+            image.extent()
+        );
+    }
+
     void copy_data_to_vertex_buffer(const std::vector<Vertex>& vertices) {
         if (sizeof(vertices[0])*vertices.size() > vertex_buffer_size()) {
             throw std::runtime_error("Failed to copy vertices too much data to copy");
         }
+        copy_data_to_buffer(*vertex_buffer, vertices.data(), vertices.size() * sizeof(vertices[0]));
+    }
 
-        void* data = device->mapMemory(*vertex_buffer_memory, 0, vertex_buffer_size(), vk::MemoryMapFlags{});
-        memcpy(data, vertices.data(), vertices.size() * sizeof(vertices[0]));
-        device->unmapMemory(*vertex_buffer_memory);
+    void copy_data_to_index_buffer(const std::vector<uint16_t>& indices) {
+        if (sizeof(indices[0])*indices.size() > index_buffer_size()) {
+            throw std::runtime_error("Failed to copy indices too much data to copy");
+        }
+        copy_data_to_buffer(*index_buffer, indices.data(), indices.size() * sizeof(indices[0]));
+    }
+
+    vk::UniqueCommandBuffer begin_one_time_commands() {
+        auto command_buffers = device->allocateCommandBuffersUnique(
+            vk::CommandBufferAllocateInfo{}
+                .setCommandPool(*command_pool)
+                .setLevel(vk::CommandBufferLevel::ePrimary)
+                .setCommandBufferCount(1)
+        );
+
+        command_buffers[0]->begin(
+            vk::CommandBufferBeginInfo{}
+                .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)
+        );
+
+        return std::move(command_buffers[0]);
+    }
+
+    void end_one_time_commands(vk::UniqueCommandBuffer command_buffer) {
+        command_buffer->end();
+
+        auto queue = this->queue();
+        queue.submit(
+            vk::SubmitInfo{}
+                .setCommandBufferCount(1)
+                .setPCommandBuffers(&command_buffer.get()),
+            vk::Fence{}
+        );
+        queue.waitIdle();
+    }
+
+    void copy_buffer(vk::Buffer src, vk::Buffer dst, vk::DeviceSize size) {
+        auto command_buffer = begin_one_time_commands();
+        command_buffer->copyBuffer(
+            src,
+            dst,
+            vk::BufferCopy{0, 0, size}
+        );
+        end_one_time_commands(std::move(command_buffer));
+    }
+
+    void copy_buffer_to_image(vk::Buffer src, vk::Image dst, vk::Extent2D extent) {
+        auto command_buffer = begin_one_time_commands();
+        command_buffer->copyBufferToImage(
+            src,
+            dst,
+            vk::ImageLayout::eTransferDstOptimal,
+            vk::BufferImageCopy{}
+                .setBufferOffset(0)
+                .setBufferRowLength(0)
+                .setBufferImageHeight(0)
+                .setImageSubresource(vk::ImageSubresourceLayers{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setMipLevel(0)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1))
+                .setImageOffset({0, 0, 0})
+                .setImageExtent({extent.width, extent.height, 1})
+        );
+        end_one_time_commands(std::move(command_buffer));
+    }
+
+    void transition_image_layout(
+        vk::Image image,
+        vk::Format format,
+        vk::ImageLayout old_layout,
+        vk::ImageLayout new_layout
+    ) {
+
+        auto command_buffer = begin_one_time_commands();
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setOldLayout(old_layout)
+            .setNewLayout(new_layout)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(image)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        
+        vk::PipelineStageFlags source_stage;
+        vk::PipelineStageFlags destination_stage;
+
+        if (old_layout == vk::ImageLayout::eUndefined && new_layout == vk::ImageLayout::eTransferDstOptimal) {
+            barrier.setSrcAccessMask({})
+                   .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+            
+            source_stage = vk::PipelineStageFlagBits::eTopOfPipe;
+            destination_stage = vk::PipelineStageFlagBits::eTransfer;
+        } else if (old_layout == vk::ImageLayout::eTransferDstOptimal && new_layout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+            barrier.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+                   .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+            
+            source_stage = vk::PipelineStageFlagBits::eTransfer;
+            destination_stage = vk::PipelineStageFlagBits::eFragmentShader;
+        } else {
+            throw std::invalid_argument("unsupported layout transition");
+        }
+
+        command_buffer->pipelineBarrier(source_stage, destination_stage, {}, {}, {}, barrier);
+        end_one_time_commands(std::move(command_buffer));
     }
 
     uint32_t find_memory_type(uint32_t type_filter, vk::MemoryPropertyFlags properties) const {
@@ -266,6 +508,80 @@ public:
         }
 
         throw std::runtime_error("Failed to find suitable memory type");
+    }
+
+    vk::UniqueBuffer make_buffer(vk::BufferUsageFlags usage, vk::DeviceSize size) {
+        return device->createBufferUnique(
+            vk::BufferCreateInfo{}
+                .setSize(size)
+                .setUsage(usage)
+                .setSharingMode(vk::SharingMode::eExclusive)
+        );
+    }
+
+    vk::UniqueDeviceMemory make_buffer_memory(vk::Buffer buffer, vk::MemoryPropertyFlags properties) {
+        const auto mem_requirements = device->getBufferMemoryRequirements(buffer);
+        auto buffer_memory = device->allocateMemoryUnique(
+            vk::MemoryAllocateInfo {
+                mem_requirements.size,
+                find_memory_type(
+                    mem_requirements.memoryTypeBits,
+                    properties
+                )
+            }
+        );
+        device->bindBufferMemory(buffer, *buffer_memory, 0);
+        return buffer_memory;
+    }
+
+    vk::UniqueImage make_image(
+        vk::Extent2D extent,
+        vk::Format format,
+        vk::ImageTiling tiling,
+        vk::ImageUsageFlags usage
+    ) {
+        return device->createImageUnique(
+            vk::ImageCreateInfo{}
+                .setImageType(vk::ImageType::e2D)
+                .setExtent(vk::Extent3D{extent.width, extent.height, 1})
+                .setMipLevels(1)
+                .setArrayLayers(1)
+                .setFormat(format)
+                .setTiling(tiling)
+                .setInitialLayout(vk::ImageLayout::eUndefined)
+                .setUsage(usage)
+                .setSharingMode(vk::SharingMode::eExclusive)
+                .setSamples(vk::SampleCountFlagBits::e1)
+        );
+    }
+
+    vk::UniqueDeviceMemory make_image_memory(vk::Image image, vk::MemoryPropertyFlags properties) {
+        const auto mem_requirements = device->getImageMemoryRequirements(image);
+        auto image_memory = device->allocateMemoryUnique(
+            vk::MemoryAllocateInfo(
+                mem_requirements.size,
+                find_memory_type(
+                    mem_requirements.memoryTypeBits,
+                    properties
+                )
+            )
+        );
+        device->bindImageMemory(image, *image_memory, 0);
+        return image_memory;
+    }
+
+    void update_uniform_buffer(const SpinAnimation& animation, uint32_t image_index) {
+        const auto extent = current_extent();
+        Mvp mvp{
+            animation.model(),
+            glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+            glm::perspective(glm::radians(45.0f), extent.width / static_cast<float>(extent.height), 0.1f, 10.0f),
+        };
+        mvp.proj[1][1] *= -1;
+
+        void* data = device->mapMemory(*uniform_buffers_memory[image_index], 0, sizeof(mvp));
+        memcpy(data, &mvp, sizeof(mvp));
+        device->unmapMemory(*uniform_buffers_memory[image_index]);
     }
 
     void setup_swapchain() {
@@ -335,6 +651,20 @@ public:
             .setPName("main")
         );
 
+        auto ubo_layout_binding = vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex);
+        
+        if (!descriptor_set_layout) {
+            descriptor_set_layout = device->createDescriptorSetLayoutUnique(
+                vk::DescriptorSetLayoutCreateInfo{}
+                    .setBindingCount(1)
+                    .setPBindings(&ubo_layout_binding)
+            );
+        }
+
         auto vertex_binding_description = Vertex::binding_description();
         auto vertex_attribute_description = Vertex::attribute_description();
         auto vertex_input_create_info = vk::PipelineVertexInputStateCreateInfo{}
@@ -371,7 +701,7 @@ public:
             .setPolygonMode(vk::PolygonMode::eFill)
             .setLineWidth(1.0f)
             .setCullMode(vk::CullModeFlagBits::eBack)
-            .setFrontFace(vk::FrontFace::eClockwise);
+            .setFrontFace(vk::FrontFace::eCounterClockwise);
 
         auto multi_sampling = vk::PipelineMultisampleStateCreateInfo{};
 
@@ -384,7 +714,9 @@ public:
             .setAttachmentCount(1)
             .setPAttachments(&colour_blend_attachment);
 
-        pipeline_layout = PipelineLayoutBuilder{}.build(device);
+        pipeline_layout = PipelineLayoutBuilder{}
+            .set_layouts({*descriptor_set_layout})
+            .build(device);
 
         auto colour_attachment = vk::AttachmentDescription{}
             .setFormat(image_format)
@@ -455,27 +787,112 @@ public:
         }
 
         if (!vertex_buffer) {
-            vertex_buffer = device->createBufferUnique(
-                vk::BufferCreateInfo{}
-                    .setSize(vertex_buffer_size())
-                    .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
-                    .setSharingMode(vk::SharingMode::eExclusive)
+            vertex_buffer = make_buffer(
+                vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+                vertex_buffer_size()
             );
         }
 
-        const auto mem_requirements = device->getBufferMemoryRequirements(*vertex_buffer);
-        vertex_buffer_memory = device->allocateMemoryUnique(
-            vk::MemoryAllocateInfo {
-                mem_requirements.size,
-                find_memory_type(
-                    mem_requirements.memoryTypeBits,
-                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-                )
-            }
+        if (!vertex_buffer_memory) {
+            vertex_buffer_memory = make_buffer_memory(
+                *vertex_buffer,
+                vk::MemoryPropertyFlagBits::eDeviceLocal
+            );
+            copy_data_to_vertex_buffer(kVertices);
+        }
+
+        if (!index_buffer) {
+            index_buffer = make_buffer(
+                vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+                index_buffer_size()
+            );
+        }
+
+        if (!index_buffer_memory) {
+            index_buffer_memory = make_buffer_memory(
+                *index_buffer,
+                vk::MemoryPropertyFlagBits::eDeviceLocal
+            );
+            copy_data_to_index_buffer(kIndices);
+        }
+
+        if (!texture_image || !texture_image_memory) {
+            auto texture = StbImage::from_file("textures/texture.jpg");
+            texture_image = make_image(
+                texture.extent(),
+                vk::Format::eR8G8B8A8Srgb,
+                vk::ImageTiling::eOptimal,
+                vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled
+            );
+
+            texture_image_memory = make_image_memory(
+                *texture_image,
+                vk::MemoryPropertyFlagBits::eDeviceLocal
+            );
+
+            copy_stbimage_to_image(*texture_image, texture);
+            transition_image_layout(
+                *texture_image,
+                vk::Format::eR8G8B8A8Srgb,
+                vk::ImageLayout::eTransferDstOptimal,
+                vk::ImageLayout::eShaderReadOnlyOptimal
+            );
+        }
+
+        auto pool_size = vk::DescriptorPoolSize{}
+            .setDescriptorCount(image_count);
+
+        descriptor_pool = device->createDescriptorPoolUnique(
+            vk::DescriptorPoolCreateInfo{}
+                .setPoolSizeCount(1)
+                .setPPoolSizes(&pool_size)
+                .setMaxSets(image_count)
         );
 
-        device->bindBufferMemory(*vertex_buffer, *vertex_buffer_memory, 0);
-        copy_data_to_vertex_buffer(kVertices);
+        std::vector<vk::DescriptorSetLayout> set_layouts(image_count, *descriptor_set_layout);
+        descriptor_sets = device->allocateDescriptorSetsUnique(
+            vk::DescriptorSetAllocateInfo{}
+                .setDescriptorPool(*descriptor_pool)
+                .setDescriptorSetCount(image_count)
+                .setPSetLayouts(set_layouts.data())
+        );
+
+        for (size_t i = 0; i < image_count; i++) {
+            uniform_buffers.push_back(
+                make_buffer(
+                    vk::BufferUsageFlagBits::eUniformBuffer,
+                    sizeof(Mvp)
+                )
+            );
+        }
+
+        for (size_t i = 0; i < image_count; i++) {
+            uniform_buffers_memory.push_back(
+                make_buffer_memory(
+                    *uniform_buffers[i],
+                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+                )
+            );
+        }
+
+        for (size_t i = 0; i < image_count; i++) {
+            auto buffer_info = vk::DescriptorBufferInfo{}
+                .setBuffer(*uniform_buffers[i])
+                .setOffset(0)
+                .setRange(sizeof(Mvp));
+
+            device->updateDescriptorSets(
+                vk::WriteDescriptorSet{}
+                    .setDstSet(*descriptor_sets[i])
+                    .setDstBinding(0)
+                    .setDstArrayElement(0)
+                    .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                    .setDescriptorCount(1)
+                    .setPBufferInfo(&buffer_info),
+                {}
+            );
+        }
+
 
         command_buffers = device->allocateCommandBuffersUnique(
             vk::CommandBufferAllocateInfo{}
@@ -484,7 +901,7 @@ public:
                 .setCommandBufferCount(static_cast<std::uint32_t>(framebuffers.size()))
         );
 
-        for (std::size_t i = 0; i < command_buffers.size(); i++) {
+        for (size_t i = 0; i < command_buffers.size(); i++) {
             command_buffers[i]->begin(
                 vk::CommandBufferBeginInfo{}
             );
@@ -508,7 +925,15 @@ public:
 
             command_buffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, *graphics_pipeline);
             command_buffers[i]->bindVertexBuffers(0, *vertex_buffer, {0});
-            command_buffers[i]->draw(static_cast<uint32_t>(kVertices.size()), 1, 0, 0);
+            command_buffers[i]->bindIndexBuffer(*index_buffer, 0, vk::IndexType::eUint16);
+            command_buffers[i]->bindDescriptorSets(
+                vk::PipelineBindPoint::eGraphics,
+                *pipeline_layout,
+                0,
+                *descriptor_sets[i],
+                {}
+            );
+            command_buffers[i]->drawIndexed(static_cast<uint32_t>(kIndices.size()), 1, 0, 0, 0);
             command_buffers[i]->endRenderPass();
             command_buffers[i]->end();
         }
@@ -531,8 +956,17 @@ public:
         new_state.instance = std::move(vulkan_state.instance);
         new_state.surface = std::move(vulkan_state.surface);
         new_state.device = std::move(vulkan_state.device);
+        new_state.descriptor_set_layout = std::move(vulkan_state.descriptor_set_layout);
         new_state.command_pool = std::move(vulkan_state.command_pool);
+
         new_state.vertex_buffer = std::move(vulkan_state.vertex_buffer);
+        new_state.vertex_buffer_memory = std::move(vulkan_state.vertex_buffer_memory);
+
+        new_state.index_buffer = std::move(vulkan_state.index_buffer);
+        new_state.index_buffer_memory = std::move(vulkan_state.index_buffer_memory);
+
+        new_state.texture_image = std::move(vulkan_state.texture_image);
+        new_state.texture_image_memory = std::move(vulkan_state.texture_image_memory);
 
         // destruct the remaining state
         [](VulkanState s){}(std::move(vulkan_state));
@@ -572,10 +1006,13 @@ void do_draw(VulkanState& vulkan_state, int in_flight_index, bool resized) {
     }
     vulkan_state.image_fences[image_index] = *vulkan_state.in_flight_fences[in_flight_index];
 
-    auto queue = vulkan_state.device->getQueue(vulkan_state.queue_family_index, 0);
+    auto queue = vulkan_state.queue();
     vulkan_state.device->resetFences(
         *vulkan_state.in_flight_fences[in_flight_index]
     );
+
+    static SpinAnimation animation{std::chrono::steady_clock::now(), 90.0f};
+    vulkan_state.update_uniform_buffer(animation, image_index);
 
     vk::PipelineStageFlags wait_stages = vk::PipelineStageFlagBits::eColorAttachmentOutput;
     queue.submit(
@@ -648,7 +1085,8 @@ int inner_main() {
 
         First {
             [](auto& ctx, int j){return ctx.handle_request("hello");},
-
+            [](auto& ctx, std::unique_ptr<int> i) {return *i;},
+            [](auto& ctx, std::unique_ptr<int> i) {return *i;},
             // The first handler returns void, it doesn't need to know the correct type to return.
             [](auto& ctx, const char* c_str){return;},
             // The next handler returns an empty optional, this means it wasn't able
@@ -657,9 +1095,13 @@ int inner_main() {
             // Because the previous handler wasn't able to answer, this handler is called
             [](auto& ctx, const char* c_str){return std::optional<int>(2);},
             // Because the previous handler was able to answer, this handler is not called, but 
-            // it still has to return the same type or void.
+            // it still has to return the same type.
             [](auto& ctx, const char* c_str){return std::optional<int>(4);},
-            [](auto& ctx, const char* c_str){return;},
+
+            // Can't have a handler return void after another handler has returned non void to 
+            // avoid void handlers being shadowed since the only reason to call a void handler would
+            // be to produce side effects.
+            // [](auto& ctx, const char* c_str){return;},
 
             // This is ok even though MyRequest is not copyable. This is because
             // the first handler doesn't return a std::optional, this indicates to
@@ -675,11 +1117,11 @@ int inner_main() {
 
     std::cout << ctx.handle_request(5).value() << std::endl;
     std::cout << ctx.handle_request(MyRequest{}) << std::endl;
+    ctx.handle_request(std::make_unique<int>(2));
 
     ctx.handle_event(MyEvent{});
     ctx.handle_event(std::string("hello"));
     ctx.handle_event(2);
-
 
     const int width = 1800;
     const int height = 1000;
@@ -693,6 +1135,7 @@ int inner_main() {
     );
 
     auto vulkan_state = VulkanState::for_window(window);
+
     SDL_Event event;
     int in_flight_index = 0;
     bool resized = false;
@@ -727,6 +1170,7 @@ int inner_main() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         } else {
             do_draw(vulkan_state, in_flight_index, resized);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
             resized = false;
             in_flight_index = (in_flight_index + 1)%2;
         }

@@ -11,15 +11,15 @@ class MustHandle {
 public:
     MustHandle(HandlerT handler): handler(std::move(handler)) {}
 
-    template<typename CtxT, typename EventT, typename = std::enable_if_t<can_call<HandlerT, CtxT&, EventT>::value>>
-    auto operator()(CtxT& ctx, EventT&& event) {
-        return handler(ctx, std::forward<EventT>(event));
+    template<typename CtxT, typename T, typename = std::enable_if_t<can_call<HandlerT, CtxT&, T>::value>>
+    auto operator()(CtxT& ctx, T&& event) {
+        return handler(ctx, std::forward<T>(event));
     }
 
     // This doesn't allow sfinae to ignore a lack of handlers
-    template<typename CtxT, typename EventT>
-    std::enable_if_t<!can_call<HandlerT, CtxT&, EventT>::value> operator()(CtxT& ctx, EventT&& event) {
-        static_assert(!std::is_same_v<EventT, EventT>, "MustHandle could not find handler for EventT");
+    template<typename CtxT, typename T>
+    std::enable_if_t<!can_call<HandlerT, CtxT&, T>::value> operator()(CtxT& ctx, T&& event) {
+        static_assert(false_v<T>, "MustHandle could not find handler for T");
     }
 private:
     HandlerT handler;
