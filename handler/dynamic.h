@@ -10,7 +10,7 @@ class Dynamic {
 public:
     Dynamic(std::vector<HandlerT> handlers): handlers(std::move(handlers)) {}
 
-    template<typename CtxT, typename EventT, typename = std::enable_if_t<can_call<HandlerT, CtxT&, EventT>>>
+    template<typename CtxT, typename EventT, typename = std::enable_if_t<dispatch_match_v<HandlerT, CtxT&, EventT>>>
     void operator()(CtxT& ctx, EventT&& event) {
         if (handlers.size() == 0) {
             return;

@@ -1090,7 +1090,7 @@ int inner_main() {
             // The first handler returns void, it doesn't need to know the correct type to return.
             [](auto& ctx, const char* c_str){return;},
             // The next handler returns an empty optional, this means it wasn't able
-            // to answer the request, maybe a setting wasn't been provided or a dll wasn't found. 
+            // to try to answer the request, maybe a setting wasn't been provided or a dll wasn't found. 
             [](auto& ctx, const char* c_str){return std::optional<int>{};},
             // Because the previous handler wasn't able to answer, this handler is called
             [](auto& ctx, const char* c_str){return std::optional<int>(2);},

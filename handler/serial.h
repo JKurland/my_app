@@ -2,6 +2,7 @@
 #include <tuple>
 #include <type_traits>
 #include <memory>
+#include <array>
 #include "meta.h"
 
 
@@ -10,19 +11,19 @@ class Serial {
 public:
     Serial(HandlerTs...handlers): handlers(std::move(handlers)...) {}
 
-    template<typename CtxT, typename EventT, typename = std::enable_if_t<(count_can_call<std::tuple<CtxT&, EventT>, HandlerTs...>() > 0)>>
+    template<typename CtxT, typename EventT, typename = std::enable_if_t<(count_dispatch_match<std::tuple<CtxT&, EventT>, HandlerTs...>() > 0)>>
     void operator() (CtxT& ctx, EventT&& event) {
         // check can call with EventT to help people catch missing const specifiers. They will get
         // a compiler error instead of their event handler not being called
 
-        constexpr auto head = can_call_head<std::tuple<CtxT&, EventT>, HandlerTs...>();
+        constexpr auto head = dispatch_match_head<std::tuple<CtxT&, EventT>, HandlerTs...>();
         static_for_each_index(handlers, [&](auto& handler){
             handler(ctx, static_cast<const EventT&>(event));
         }, head);
 
         // forward the event to the last handler, the last handler is
         // allowed to do whatever it wants to event (e.g. move out of it).
-        constexpr std::size_t last = can_call_last<std::tuple<CtxT&, EventT>, HandlerTs...>();
+        constexpr std::size_t last = dispatch_match_last<std::tuple<CtxT&, EventT>, HandlerTs...>();
         std::get<last>(handlers)(ctx, std::forward<EventT>(event));
     }
 

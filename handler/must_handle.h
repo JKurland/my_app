@@ -11,16 +11,12 @@ class MustHandle {
 public:
     MustHandle(HandlerT handler): handler(std::move(handler)) {}
 
-    template<typename CtxT, typename T, typename = std::enable_if_t<can_call<HandlerT, CtxT&, T>::value>>
+    template<typename CtxT, typename T>
     auto operator()(CtxT& ctx, T&& event) {
+        static_assert(dispatch_match_v<HandlerT, CtxT&, T>, "MustHandle could not find handler for T");
         return handler(ctx, std::forward<T>(event));
     }
 
-    // This doesn't allow sfinae to ignore a lack of handlers
-    template<typename CtxT, typename T>
-    std::enable_if_t<!can_call<HandlerT, CtxT&, T>::value> operator()(CtxT& ctx, T&& event) {
-        static_assert(false_v<T>, "MustHandle could not find handler for T");
-    }
 private:
     HandlerT handler;
 };

@@ -19,7 +19,13 @@ namespace detail {
     template<typename ResultT>
     struct FirstResultWrapper {
         template<typename F>
-        auto& operator<<(F&&) {
+        auto& operator<<(F&& f) {
+            // Anytime this is called F is a handler that is being shadowed, that is F will never be called.
+            // There are a few options of what to check for here. Could allow anything and take the silent shadowing.
+            // Could just check the anything being shadowed has a compatible return type or could disallow anything being shadowed.
+            // Atm it's just checking that any handler being shadowed has a compatible return type.
+            using RetT = decltype(f());
+            static_assert(std::is_same_v<RetT, ResultT> || std::is_same_v<RetT, std::optional<ResultT>> || false_v<F>, "F must either return ResultT or std::optional<ResultT>");
             return *this;
         }
         ResultT&& get(){return std::move(r);}
@@ -142,10 +148,12 @@ class First {
 public:
     First(HandlerTs...handlers): handlers(handlers...) {}
 
-    template<typename CtxT, typename RequestT, typename = std::enable_if_t<any_can_call<std::tuple<CtxT&, RequestT>, HandlerTs...>()>>
+    // Search for a handler based on remove_cvref_t<RequestT> because basing dispatch on just the type of request
+    // seems like the easiest thing to work with
+    template<typename CtxT, typename RequestT, typename = std::enable_if_t<any_dispatch_match<std::tuple<CtxT&, RequestT>, HandlerTs...>()>>
     auto operator() (CtxT& ctx, RequestT&& request) {
-        constexpr auto head = can_call_head<std::tuple<CtxT&, RequestT>, HandlerTs...>();
-        constexpr std::size_t last = can_call_last<std::tuple<CtxT&, RequestT>, HandlerTs...>();
+        constexpr auto head = dispatch_match_head<std::tuple<CtxT&, RequestT>, HandlerTs...>();
+        constexpr std::size_t last = dispatch_match_last<std::tuple<CtxT&, RequestT>, HandlerTs...>();
         return detail::first_impl<last>(handlers, head, ctx, std::forward<RequestT>(request));
     }
 

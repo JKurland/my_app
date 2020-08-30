@@ -101,7 +101,7 @@ public:
         worker(std::make_unique<detail::Worker>(max_queue_size))
         {}
 
-    template<typename CtxT, typename EventT, typename = std::enable_if_t<can_call<HandlerT, CtxT&, EventT>::value>>
+    template<typename CtxT, typename EventT, typename = std::enable_if_t<dispatch_match_v<HandlerT, CtxT&, EventT>>>
     auto operator()(CtxT& ctx, EventT event) {
         std::promise<decltype((*handler)(ctx, std::move(event)))> promise;
         auto future = promise.get_future();
