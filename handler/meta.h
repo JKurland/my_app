@@ -58,11 +58,20 @@ using remove_cv_keep_ref_t = typename remove_cv_keep_ref<T>::type;
 namespace detail {
     template<typename T>
     struct castable_to {
-        // default template param to remove ambiguity
-        template<typename = void>
-        operator remove_cvref_t<T>&() const;
+        // Used to test whether a callable is suitable to be dispatched to.
+        // castable_to can be casted to anything T can be casted to but ignoring references.
+        template<
+            typename U,
+            typename = std::enable_if_t<std::is_convertible_v<remove_cvref_t<T>, U> || std::is_convertible_v<remove_cvref_t<T>&, U>>,
+            typename = void // default template param to remove ambiguity
+        >
+        operator U&() const;
 
-        operator remove_cvref_t<T>&&() const;
+        template<
+            typename U,
+            typename = std::enable_if_t<std::is_convertible_v<remove_cvref_t<T>, U> || std::is_convertible_v<remove_cvref_t<T>&, U>>
+        >
+        operator U&&() const;
     };
 
     template<typename F, typename...ArgTs>

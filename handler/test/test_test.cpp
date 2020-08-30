@@ -328,3 +328,23 @@ TEST(TestDispatch, const_ctx) {
     struct F { void operator()(int& ctx, float s){} };
     static_assert(dispatch_match_v<F, const int&, float>, "");
 }
+
+struct ConstTo {
+    ConstTo(int& i) {}
+};
+
+struct ConstToRefRef {
+    ConstToRefRef(int&& i) {}
+};
+
+TEST(TestDispatch, const_with_conversion) {
+    struct F { void operator()(int& ctx, ConstTo s){} };
+    static_assert(dispatch_match_v<F, int&, const int>, "");
+    static_assert(dispatch_match_v<F, int&, const int&>, "");
+    static_assert(dispatch_match_v<F, int&, const int&&>, "");
+
+    struct F2 { void operator()(int& ctx, ConstToRefRef s){} };
+    static_assert(dispatch_match_v<F2, int&, const int>, "");
+    static_assert(dispatch_match_v<F2, int&, const int&>, "");
+    static_assert(dispatch_match_v<F2, int&, const int&&>, "");
+}

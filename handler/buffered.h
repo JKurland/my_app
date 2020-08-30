@@ -97,22 +97,22 @@ template<typename HandlerT>
 class Buffered {
 public:
     Buffered(HandlerT handler, std::size_t max_queue_size=0): 
-        handler(std::make_unique<HandlerT>(std::move(handler))),
+        handler(std::move(handler)),
         worker(std::make_unique<detail::Worker>(max_queue_size))
         {}
 
     template<typename CtxT, typename EventT, typename = std::enable_if_t<dispatch_match_v<HandlerT, CtxT&, EventT>>>
     auto operator()(CtxT& ctx, EventT event) {
-        std::promise<decltype((*handler)(ctx, std::move(event)))> promise;
+        std::promise<std::decay_t<decltype(handler(ctx, std::move(event)))>> promise;
         auto future = promise.get_future();
 
-        worker->add_job([h=handler.get(), &ctx, e=std::move(event), p=std::move(promise)] () mutable {
+        worker->add_job([this, &ctx, e=std::move(event), p=std::move(promise)] () mutable {
             try {
-                if constexpr (std::is_void_v<decltype((*h)(ctx, std::move(e)))>) {
-                    (*h)(ctx, std::move(e));
+                if constexpr (std::is_void_v<decltype(handler(ctx, std::move(e)))>) {
+                    handler(ctx, std::move(e));
                     p.set_value();
                 } else {
-                    p.set_value((*h)(ctx, std::move(e)));
+                    p.set_value(handler(ctx, std::move(e)));
                 }
             } catch (...) {
                 try {
@@ -125,6 +125,6 @@ public:
         return future;
     }
 private:
-    std::unique_ptr<HandlerT> handler;
+    HandlerT handler;
     std::unique_ptr<detail::Worker> worker;
 };

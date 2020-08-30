@@ -1059,7 +1059,7 @@ int inner_main() {
                 // not have to be copy constructable. It can be moved into the handler
                 [](auto& ctx, MyEvent e){std::cout << "Moved from MyEvent" << std::endl;},
 
-                // Compiler error because MyEvent can't be copied but 2 handlers want ownership
+                // Compiler error because MyEvent can't be copied but 2 handlers want to take by value
                 // [](auto& ctx, MyEvent e){std::cout << "MyEvent is already taken" << std::endl;},
 
                 Buffered {
